@@ -462,6 +462,140 @@ def pagina_orcamento(contexto: dict, mes: date) -> None:
         except Exception:
             st.error("Não foi possível salvar o orçamento.")
 
+def pagina_importar(contexto: dict) -> None:
+    import pandas as pd
+
+    from src.services import importacao
+
+    st.subheader("Importar extrato")
+    st.caption("Aceita arquivos OFX (recomendado) e CSV do seu banco.")
+
+    arquivo = st.file_uploader("Arquivo do extrato", type=["ofx", "csv"])
+    if arquivo is None:
+        return
+
+    conteudo = arquivo.getvalue()
+
+    try:
+        if arquivo.name.lower().endswith(".ofx"):
+            extrato = importacao.ler_ofx(conteudo)
+        else:
+            colunas = importacao.colunas_csv(conteudo)
+            c1, c2, c3 = st.columns(3)
+            col_data = c1.selectbox("Coluna da data", colunas)
+            col_desc = c2.selectbox("Coluna da descrição", colunas)
+            col_valor = c3.selectbox("Coluna do valor", colunas)
+            extrato = importacao.ler_csv(
+                conteudo, col_data, col_desc, col_valor
+            )
+    except Exception:
+        st.error("Não foi possível ler o arquivo. Confira o formato.")
+        return
+
+    if extrato.empty:
+        st.warning("Nenhuma transação encontrada no arquivo.")
+        return
+
+    existentes = dados.ids_externos_existentes(
+        contexto["familia_id"], extrato["id_externo"].tolist()
+    )
+    extrato["duplicado"] = extrato["id_externo"].isin(existentes)
+    extrato["importar"] = ~extrato["duplicado"]
+
+    cat_despesa = [c["nome"] for c in dados.listar_categorias("despesa")]
+    cat_receita = [c["nome"] for c in dados.listar_categorias("receita")]
+    todas = cat_despesa + [c for c in cat_receita if c not in cat_despesa]
+
+    extrato["categoria"] = extrato["tipo"].map(
+        {"despesa": cat_despesa[0] if cat_despesa else None,
+         "receita": cat_receita[0] if cat_receita else None}
+    )
+    extrato["valor"] = extrato["valor"].astype(float)
+
+    nomes_membros = [m["nome"] for m in contexto["membros"]]
+    extrato["pessoa"] = contexto["eu"]["nome"]
+
+    st.info(
+        f"{len(extrato)} transações lidas. "
+        f"{int(extrato['duplicado'].sum())} já importadas antes."
+    )
+
+    editado = st.data_editor(
+        extrato[["importar", "data", "descricao", "valor", "tipo",
+                 "categoria", "pessoa", "duplicado"]],
+        column_config={
+            "importar": st.column_config.CheckboxColumn("Importar"),
+            "data": st.column_config.DateColumn(
+                "Data", format="DD/MM/YYYY", disabled=True
+            ),
+            "descricao": st.column_config.TextColumn("Descrição"),
+            "valor": st.column_config.NumberColumn(
+                "Valor (R$)", format="%.2f", disabled=True
+            ),
+            "tipo": st.column_config.SelectboxColumn(
+                "Tipo", options=["despesa", "receita"]
+            ),
+            "categoria": st.column_config.SelectboxColumn(
+                "Categoria", options=todas
+            ),
+            "pessoa": st.column_config.SelectboxColumn(
+                "Quem", options=nomes_membros
+            ),
+            "duplicado": st.column_config.CheckboxColumn(
+                "Duplicado", disabled=True
+            ),
+        },
+        hide_index=True,
+        width="stretch",
+    )
+
+    if st.button("Importar selecionados", type="primary"):
+        mapa_cat = {}
+        for tipo in ("despesa", "receita"):
+            for item in dados.listar_categorias(tipo):
+                mapa_cat[(tipo, item["nome"])] = item["id"]
+        mapa_pessoa = {m["nome"]: m["id"] for m in contexto["membros"]}
+
+        registros = []
+        ignorados = 0
+        for posicao, linha in editado.iterrows():
+            if not linha["importar"]:
+                continue
+            categoria_id = mapa_cat.get((linha["tipo"], linha["categoria"]))
+            if categoria_id is None:
+                ignorados += 1
+                continue
+            registros.append(
+                {
+                    "familia_id": contexto["familia_id"],
+                    "tipo": linha["tipo"],
+                    "descricao": str(linha["descricao"]).strip()[:200],
+                    "valor": round(float(linha["valor"]), 2),
+                    "data_lancamento": pd.Timestamp(linha["data"]).date().isoformat(),
+                    "categoria_id": categoria_id,
+                    "forma_pagamento": "outro",
+                    "pago_por": mapa_pessoa[linha["pessoa"]],
+                    "registrado_por": contexto["eu"]["id"],
+                    "id_externo": extrato.loc[posicao, "id_externo"],
+                }
+            )
+
+        if not registros:
+            st.warning("Nada selecionado para importar.")
+            return
+
+        try:
+            dados.inserir_lancamentos_em_lote(registros)
+            st.success(f"{len(registros)} lançamentos importados.")
+            if ignorados:
+                st.warning(
+                    f"{ignorados} ignorados: categoria incompatível com o tipo."
+                )
+        except Exception:
+            st.error(
+                "Não foi possível importar. Confira se há duplicidades "
+                "ou problemas de permissão."
+            )
 
 def principal() -> None:
     try:
@@ -493,8 +627,8 @@ def principal() -> None:
 
     mes = seletor_mes()
 
-    aba_resumo, aba_lancamentos, aba_orcamento = st.tabs(
-        ["Resumo", "Lançamentos", "Orçamento"]
+    aba_resumo, aba_lancamentos, aba_orcamento, aba_importar = st.tabs(
+        ["Resumo", "Lançamentos", "Orçamento", "Importar"]
     )
 
     with aba_resumo:
@@ -505,6 +639,9 @@ def principal() -> None:
 
     with aba_orcamento:
         pagina_orcamento(contexto, mes)
+
+    with aba_importar:
+        pagina_importar(contexto)
 
 
 if auth.esta_logado():

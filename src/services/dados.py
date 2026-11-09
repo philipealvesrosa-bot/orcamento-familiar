@@ -148,3 +148,29 @@ def atualizar_lancamento(lancamento_id, campos: dict) -> None:
         .eq("id", str(lancamento_id))
         .execute()
     )
+
+def ids_externos_existentes(familia_id, ids: list[str]) -> set[str]:
+    """Retorna quais identificadores já foram importados."""
+    existentes = set()
+    for inicio in range(0, len(ids), 100):
+        lote = ids[inicio:inicio + 100]
+        resposta = (
+            obter_cliente()
+            .table("lancamentos")
+            .select("id_externo")
+            .eq("familia_id", str(familia_id))
+            .in_("id_externo", lote)
+            .execute()
+        )
+        existentes.update(item["id_externo"] for item in resposta.data)
+    return existentes
+
+
+def inserir_lancamentos_em_lote(registros: list[dict]) -> None:
+    for inicio in range(0, len(registros), 100):
+        (
+            obter_cliente()
+            .table("lancamentos")
+            .insert(registros[inicio:inicio + 100])
+            .execute()
+        )
