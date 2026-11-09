@@ -289,6 +289,100 @@ def pagina_lancamentos(contexto: dict, mes: date) -> None:
             if registro["observacoes"]:
                 st.write(f"**Observações:** {registro['observacoes']}")
 
+            with st.form(f"form_editar_{registro['id']}"):
+                st.markdown("**Editar lançamento**")
+
+                nova_descricao = st.text_input(
+                    "Descrição",
+                    value=registro["descricao"],
+                    max_chars=200,
+                    key=f"ed_desc_{registro['id']}",
+                )
+                novo_valor = st.number_input(
+                    "Valor (R$)",
+                    min_value=0.0,
+                    step=0.01,
+                    format="%.2f",
+                    value=float(registro["valor"]),
+                    key=f"ed_valor_{registro['id']}",
+                )
+                nova_data = st.date_input(
+                    "Data",
+                    value=date.fromisoformat(
+                        str(registro["data_lancamento"])[:10]
+                    ),
+                    format="DD/MM/YYYY",
+                    key=f"ed_data_{registro['id']}",
+                )
+
+                nomes_categorias = list(mapa_categorias.keys())
+                try:
+                    indice_cat = nomes_categorias.index(
+                        registro["categoria"]
+                    )
+                except ValueError:
+                    indice_cat = 0
+                nova_categoria = st.selectbox(
+                    "Categoria",
+                    nomes_categorias,
+                    index=indice_cat,
+                    key=f"ed_cat_{registro['id']}",
+                )
+
+                chaves_forma = list(FORMAS_PAGAMENTO.keys())
+                try:
+                    indice_forma = chaves_forma.index(
+                        registro["forma_pagamento"]
+                    )
+                except ValueError:
+                    indice_forma = 0
+                nova_forma = st.selectbox(
+                    "Forma de pagamento",
+                    chaves_forma,
+                    index=indice_forma,
+                    format_func=lambda chave: FORMAS_PAGAMENTO[chave],
+                    key=f"ed_forma_{registro['id']}",
+                )
+
+                novas_obs = st.text_area(
+                    "Observações",
+                    value=registro["observacoes"] or "",
+                    max_chars=500,
+                    key=f"ed_obs_{registro['id']}",
+                )
+
+                salvar_edicao = st.form_submit_button(
+                    "Salvar alterações",
+                    width="stretch",
+                )
+
+            if salvar_edicao:
+                if not nova_descricao.strip():
+                    st.error("Informe a descrição.")
+                elif novo_valor <= 0:
+                    st.error("O valor deve ser maior que zero.")
+                else:
+                    try:
+                        dados.atualizar_lancamento(
+                            registro["id"],
+                            {
+                                "descricao": nova_descricao.strip(),
+                                "valor": round(novo_valor, 2),
+                                "data_lancamento": nova_data.isoformat(),
+                                "categoria_id": mapa_categorias[
+                                    nova_categoria
+                                ],
+                                "forma_pagamento": nova_forma,
+                                "observacoes": novas_obs.strip() or None,
+                            },
+                        )
+                        st.success("Lançamento atualizado.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível atualizar o lançamento.")
+
+            st.divider()
+
             confirmar = st.checkbox(
                 "Confirmo que quero excluir este lançamento",
                 key=f"confirmar_{registro['id']}",
@@ -304,7 +398,6 @@ def pagina_lancamentos(contexto: dict, mes: date) -> None:
                     st.rerun()
                 except Exception:
                     st.error("Não foi possível excluir o lançamento.")
-
 
 def pagina_orcamento(contexto: dict, mes: date) -> None:
     categorias = dados.listar_categorias("despesa")

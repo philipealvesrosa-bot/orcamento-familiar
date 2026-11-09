@@ -136,3 +136,15 @@ def salvar_orcamento(
         },
         on_conflict="familia_id,categoria_id,mes",
     ).execute()
+
+def atualizar_lancamento(lancamento_id, campos: dict) -> None:
+    """Atualiza um lançamento existente da família."""
+    from src.services import auth
+
+    (
+        auth.obter_cliente()
+        .table("lancamentos")
+        .update(campos)
+        .eq("id", str(lancamento_id))
+        .execute()
+    )
