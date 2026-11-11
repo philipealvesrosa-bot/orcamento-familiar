@@ -86,27 +86,58 @@ def ler_ofx(conteudo: bytes) -> pd.DataFrame:
 def ler_csv(conteudo: bytes, col_data: str, col_descricao: str,
             col_valor: str) -> pd.DataFrame:
     texto = _decodificar(conteudo)
-    try:
-        separador = csv.Sniffer().sniff(texto[:2000], delimiters=";,\t").delimiter
-    except csv.Error:
-        separador = ";"
 
-    tabela = pd.read_csv(io.StringIO(texto), sep=separador, dtype=str)
+    leitor = csv.reader(io.StringIO(texto), delimiter=",")
+    linhas_csv = list(leitor)
+
+    if not linhas_csv:
+        return pd.DataFrame()
+
+    cabecalho = [col.strip() for col in linhas_csv[0]]
+
+    try:
+        indice_data = cabecalho.index(col_data)
+        indice_descricao = cabecalho.index(col_descricao)
+        indice_valor = cabecalho.index(col_valor)
+    except ValueError:
+        raise ValueError("As colunas escolhidas não foram encontradas no CSV.")
 
     linhas = []
     contagem = {}
-    for _, registro in tabela.iterrows():
+
+    for registro in linhas_csv[1:]:
+        if len(registro) < len(cabecalho):
+            continue
+
         try:
             data = pd.to_datetime(
-                registro[col_data], dayfirst=True
+                registro[indice_data].strip(),
+                dayfirst=True,
             ).date()
-            valor = _converter_valor(str(registro[col_valor]))
+            valor = _converter_valor(registro[indice_valor])
         except (ValueError, InvalidOperation, TypeError):
             continue
 
-        descricao = str(registro[col_descricao]).strip() or "Sem descrição"
+        # Neste arquivo, a descrição é a última coluna. Se houver vírgulas
+        # não protegidas por aspas, juntamos as partes restantes.
+        descricao = ",".join(
+            registro[indice_descricao:]
+        ).strip() or "Sem descrição"
+
+        identificador = ""
+        if "Identificador" in cabecalho:
+            indice_id = cabecalho.index("Identificador")
+            if indice_id < len(registro):
+                identificador = registro[indice_id].strip()
+
         chave = (data, valor, descricao)
         contagem[chave] = contagem.get(chave, 0) + 1
+
+        id_externo = (
+            f"csv-{identificador}"
+            if identificador
+            else _gerar_id("csv", data, valor, descricao, contagem[chave])
+        )
 
         linhas.append(
             {
@@ -114,14 +145,11 @@ def ler_csv(conteudo: bytes, col_data: str, col_descricao: str,
                 "descricao": descricao[:200],
                 "valor": abs(valor),
                 "tipo": "receita" if valor > 0 else "despesa",
-                "id_externo": _gerar_id(
-                    "csv", data, valor, descricao, contagem[chave]
-                ),
+                "id_externo": id_externo,
             }
         )
 
     return pd.DataFrame(linhas)
-
 
 def colunas_csv(conteudo: bytes) -> list[str]:
     texto = _decodificar(conteudo)

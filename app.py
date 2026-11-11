@@ -315,7 +315,11 @@ def pagina_lancamentos(contexto: dict, mes: date) -> None:
                     key=f"ed_data_{registro['id']}",
                 )
 
-                nomes_categorias = list(mapa_categorias.keys())
+                categorias_do_tipo = dados.listar_categorias(registro["tipo"])
+                mapa_categorias_edicao = {
+                    c["nome"]: c["id"] for c in categorias_do_tipo
+                }
+                nomes_categorias = list(mapa_categorias_edicao.keys())
                 try:
                     indice_cat = nomes_categorias.index(
                         registro["categoria"]
@@ -369,7 +373,7 @@ def pagina_lancamentos(contexto: dict, mes: date) -> None:
                                 "descricao": nova_descricao.strip(),
                                 "valor": round(novo_valor, 2),
                                 "data_lancamento": nova_data.isoformat(),
-                                "categoria_id": mapa_categorias[
+                                "categoria_id": mapa_categorias_edicao[
                                     nova_categoria
                                 ],
                                 "forma_pagamento": nova_forma,
